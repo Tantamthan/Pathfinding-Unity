@@ -21,7 +21,7 @@ public class test : MonoBehaviour
         InitializeVisuals();
         caveGenerator.GenerateMap();
         
-        // Cập nhật màu lần đầu cho đúng trạng thái (Đen/Trắng)
+        // Cập nhật màu lần đầu
         ResetVisuals();
     }
 
@@ -49,7 +49,6 @@ public class test : MonoBehaviour
         }
     }
 
-    // Hàm Reset màu về ban đầu (Trắng/Đen) trước khi tìm đường mới
     private void ResetVisuals()
     {
         int width = pathfinding.GetGrid().GetWidth();
@@ -72,16 +71,18 @@ public class test : MonoBehaviour
         // 1. Phím M: Tạo map mới
         if (Keyboard.current.mKey.wasPressedThisFrame)
         {
-            StopAllCoroutines(); // Dừng việc tìm đường nếu đang chạy
+            StopAllCoroutines(); 
             isSearching = false;
             caveGenerator.GenerateMap();
             ResetVisuals();
+            
+            // Cập nhật HUD nếu có
+            if (GameHUD.Instance != null) GameHUD.Instance.SetStatus("Đã tạo map mới");
         }
 
         // 2. Phím SPACE: Bắt đầu tìm đường SLOW MOTION
         if (Keyboard.current.spaceKey.wasPressedThisFrame && !isSearching)
         {
-            // Bắt đầu tìm từ (0,0) đến (59,39)
             StartCoroutine(FindPathSlowly(0, 0, 59, 39));
         }
 
@@ -99,20 +100,28 @@ public class test : MonoBehaviour
         }
     }
 
-    // --- TRÁI TIM CỦA THUẬT TOÁN (Phiên bản chạy chậm) ---
+    // --- TRÁI TIM CỦA THUẬT TOÁN (Phiên bản chạy chậm & Có HUD) ---
     private IEnumerator FindPathSlowly(int startX, int startY, int endX, int endY)
     {
         isSearching = true;
-        ResetVisuals(); // Xóa các vệt màu cũ
+        ResetVisuals(); 
+
+        // --- HUD AN TOÀN: Kiểm tra xem GameHUD có tồn tại không trước khi gọi ---
+        if (GameHUD.Instance != null)
+        {
+            GameHUD.Instance.SetStatus("Đang tìm đường...");
+            GameHUD.Instance.SetInfo(0, 0);
+        }
+        // ----------------------------------------------------------------------
 
         Grid<PathNode> grid = pathfinding.GetGrid();
         PathNode startNode = grid.GetGridObject(startX, startY);
         PathNode endNode = grid.GetGridObject(endX, endY);
 
-        // Kiểm tra cơ bản
         if (!startNode.isWalkable || !endNode.isWalkable)
         {
             Debug.Log("Điểm đầu hoặc điểm cuối bị chặn!");
+            if (GameHUD.Instance != null) GameHUD.Instance.SetStatus("Bị chặn ngay từ đầu!");
             isSearching = false;
             yield break;
         }
@@ -120,7 +129,6 @@ public class test : MonoBehaviour
         List<PathNode> openList = new List<PathNode> { startNode };
         List<PathNode> closedList = new List<PathNode>();
 
-        // Reset dữ liệu tính toán
         for (int x = 0; x < grid.GetWidth(); x++)
         {
             for (int y = 0; y < grid.GetHeight(); y++)
@@ -135,6 +143,8 @@ public class test : MonoBehaviour
         startNode.gCost = 0;
         startNode.hCost = CalculateDistanceCost(startNode, endNode);
         startNode.CalculateFCost();
+        
+        int nodesCheckedCount = 0; // Biến đếm số ô duyệt
 
         while (openList.Count > 0)
         {
@@ -142,7 +152,6 @@ public class test : MonoBehaviour
 
             if (currentNode == endNode)
             {
-                // Đã tìm thấy đích!
                 ShowFinalPath(endNode);
                 isSearching = false;
                 yield break;
@@ -150,9 +159,15 @@ public class test : MonoBehaviour
 
             openList.Remove(currentNode);
             closedList.Add(currentNode);
+            
+            // --- CẬP NHẬT HUD ---
+            nodesCheckedCount++;
+            if (GameHUD.Instance != null)
+            {
+                GameHUD.Instance.SetInfo(0, nodesCheckedCount);
+            }
+            // --------------------
 
-            // --- HIỆU ỨNG: Tô màu ĐỎ cho ô ĐÃ xét duyệt ---
-            // (Trừ điểm đầu và điểm cuối ra cho dễ nhìn)
             if (currentNode != startNode && currentNode != endNode)
             {
                 visualArray[currentNode.x, currentNode.y].GetComponent<Renderer>().material.color = Color.red;
@@ -178,37 +193,46 @@ public class test : MonoBehaviour
                     if (!openList.Contains(neighbourNode))
                     {
                         openList.Add(neighbourNode);
-                        // --- HIỆU ỨNG: Tô màu XANH LÁ cho ô ĐANG chờ xét ---
                         if (neighbourNode != endNode)
                             visualArray[neighbourNode.x, neighbourNode.y].GetComponent<Renderer>().material.color = Color.green;
                     }
                 }
             }
 
-          
+            // --- QUAN TRỌNG: Dòng này giúp Unity KHÔNG BỊ TREO ---
             yield return new WaitForSeconds(0.01f); 
         }
 
+        if (GameHUD.Instance != null) GameHUD.Instance.SetStatus("Không tìm thấy đường!");
         Debug.Log("Không tìm thấy đường!");
         isSearching = false;
     }
 
-   
     private void ShowFinalPath(PathNode endNode)
     {
+        List<PathNode> path = new List<PathNode>();
         PathNode currentNode = endNode;
         while (currentNode != null)
         {
             visualArray[currentNode.x, currentNode.y].GetComponent<Renderer>().material.color = Color.blue;
+            path.Add(currentNode);
             currentNode = currentNode.cameFromNode;
         }
+        
+        // --- HUD: Báo cáo kết quả ---
+        if (GameHUD.Instance != null)
+        {
+            GameHUD.Instance.SetStatus("Đã tìm thấy đích!");
+            GameHUD.Instance.SetInfo(path.Count, 0);
+        }
+        // ---------------------------
+        
         Debug.Log("Đã tìm thấy đường đi!");
     }
 
-    // --- Các hàm phụ trợ (Copy từ Pathfinding sang để dùng được ở đây) ---
+    // --- Các hàm phụ trợ ---
     private List<PathNode> GetNeighbourList(PathNode currentNode)
     {
-      
         Grid<PathNode> grid = pathfinding.GetGrid();
         List<PathNode> neighbourList = new List<PathNode>();
         if (currentNode.x - 1 >= 0) {
@@ -243,7 +267,7 @@ public class test : MonoBehaviour
         return 14 * Mathf.Min(xDistance, yDistance) + 10 * remaining;
     }
     
-    public static Vector3 GetMouseWorldPosition() { /* Giữ nguyên hàm cũ của bạn */ 
+    public static Vector3 GetMouseWorldPosition() { 
         Vector3 vec = Camera.main.ScreenToWorldPoint(Mouse.current.position.ReadValue());
         vec.z = 0f; return vec;
     }
